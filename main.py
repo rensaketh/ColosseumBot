@@ -1,12 +1,15 @@
 import sys
 import time
+import json
 from datetime import datetime, timezone
+from pathlib import Path
 
 import yaml
 
 from bot.alarm import sound_alarm
-from bot.api import addtocart, calendars_month, find_full_price_tariff, find_slot, tariffs, visit_event_page
-from bot.session import build_session
+from bot.api import addtocart, calendars_month, find_full_price_tariff, find_slot, find_tariff_by_guid, tariffs, visit_event_page
+from bot.bootstrap import bootstrap_session
+from bot.session import build_session, session_cookie_dict, session_cookie_value
 
 COOKIES_PATH = "cookies.json"
 CONFIG_PATH = "config.yaml"
@@ -17,6 +20,18 @@ def load_config():
         return yaml.safe_load(f)
 
 
+def write_debug_json(name: str, payload: dict) -> None:
+    debug_dir = Path("debug")
+    debug_dir.mkdir(exist_ok=True)
+    (debug_dir / name).write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def create_bootstrapped_session(config: dict, slug: str):
+    session = build_session(config, COOKIES_PATH)
+    bootstrap = bootstrap_session(session, COOKIES_PATH, config, slug)
+    return session, bootstrap
+
+
 def run():
     config = load_config()
     active = config["active_event"]
@@ -25,15 +40,14 @@ def run():
 
     slug = event["slug"]
     page = event["page"]
-    target_date = event["date"]  # "YYYY-MM-DD"
+    target_date = event.get("date", config["target_date"])  # "YYYY-MM-DD"
     object_guid = event.get("object_guid")  # may be None
     quantity = event["quantity"]
 
     year, month, _ = target_date.split("-")
     year, month = int(year), int(month)
 
-    proxy = config.get("proxy")
-    session = build_session(COOKIES_PATH, proxy=proxy)
+    session, bootstrap = create_bootstrapped_session(config, slug)
 
     ip_resp = session.get("https://ip.decodo.com/json", timeout=10)
     ip_info = ip_resp.json()
@@ -45,6 +59,16 @@ def run():
     print(f"  Qty   : {quantity}")
     print(f"  Poll  : every {poll_interval}s")
     print(f"  IP    : {exit_ip}")
+    print(f"  FP    : {session_cookie_value(session, 'octofence_jslc_fp', '<missing>')}")
+    if bootstrap.get("enabled"):
+        print(f"  Boot  : inline_script={bootstrap.get('inline_script_found')} solved={bootstrap.get('solved_cookie_names')}")
+        if "octofence_jslc" not in bootstrap.get("cookies_after_bootstrap", {}):
+            print("  Warn  : bootstrap did not obtain octofence_jslc; read endpoints may work, but addtocart is likely to be blocked")
+        for step in bootstrap.get("preflight_cookie_diffs", []):
+            diff = step.get("cookie_diff_after_response", {})
+            added = ",".join(sorted(diff.get("added", {}).keys())) or "-"
+            changed = ",".join(sorted(diff.get("changed", {}).keys())) or "-"
+            print(f"  Step  : {step.get('url')} added={added} changed={changed}")
     print()
 
     attempt = 0
@@ -68,27 +92,42 @@ def run():
             end_time = slot["endDateTime"]
             print(f"found slot {start_time} (capacity={slot['capacity']})")
 
-            # Resolve object_guid via tariffs if not in config
-            resolved_guid = object_guid
-            if not resolved_guid:
-                print("  object_guid not in config — calling tariffs to find Full price...")
-                tariff_list = tariffs(session, period_id, start_time, slug, target_date)
-                full_price = find_full_price_tariff(tariff_list)
-                if not full_price:
-                    raise RuntimeError("Could not find Full price tariff in tariffs response")
-                resolved_guid = full_price["object_guid"]
-                print(f"  resolved object_guid: {resolved_guid}")
+            print("  Fetching tariffs for selected slot...")
+            tariff_list = tariffs(session, period_id, start_time, slug, target_date)
+            selected_tariff = None
+
+            if object_guid:
+                selected_tariff = find_tariff_by_guid(tariff_list, object_guid)
+                if selected_tariff:
+                    print(f"  matched configured object_guid: {object_guid}")
+                else:
+                    print("  configured object_guid not found in live tariff list; falling back to Full price...")
+
+            if not selected_tariff:
+                selected_tariff = find_full_price_tariff(tariff_list)
+                if not selected_tariff:
+                    raise RuntimeError(f"Could not resolve a usable tariff from response: {tariff_list}")
+                print(f"  resolved Full price tariff: {selected_tariff.get('object_guid')}")
+
+            write_debug_json(
+                "last_tariffs.json",
+                {
+                    "slot": slot,
+                    "selected_tariff": selected_tariff,
+                    "tariffs": tariff_list,
+                },
+            )
 
             visit_event_page(session, slug)
             print(f"  Adding {quantity}x to cart...", end=" ", flush=True)
-            result = addtocart(session, period_id, start_time, end_time, resolved_guid, quantity, page, slug)
+            result = addtocart(session, period_id, start_time, end_time, quantity, page, slug, selected_tariff)
             print(f"done — cart items: {result.get('items')}")
 
             cart_url = f"https://ticketing.colosseo.it/en/cart/"
             sound_alarm(f"Tickets added! Go to cart: {cart_url}")
             print(f"\nCart URL: {cart_url}")
             print("\nSet these cookies in your browser before visiting the cart:")
-            for name, value in session.cookies.items():
+            for name, value in session_cookie_dict(session).items():
                 print(f"  {name} = {value}")
             sys.exit(0)
 
@@ -97,6 +136,10 @@ def run():
             sys.exit(0)
         except Exception as e:
             print(f"error: {e}")
+            print("debug: if this was an OctoFence block, inspect files under ./debug/")
+            if config.get("session", {}).get("rebuild_on_error", True):
+                print("debug: rebuilding session and re-running bootstrap before the next attempt")
+                session, bootstrap = create_bootstrapped_session(config, slug)
             time.sleep(poll_interval)
 
 

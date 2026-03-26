@@ -1,15 +1,47 @@
 import urllib.parse
+import json
 from datetime import datetime, timezone
+from pathlib import Path
 
 import requests
+from bot.bootstrap import dump_debug_artifacts, solve_challenge_html
 
 BASE_URL = "https://ticketing.colosseo.it/mtajax"
 
 
+def _write_debug_json(name: str, payload: dict) -> None:
+    debug_dir = Path("debug")
+    debug_dir.mkdir(exist_ok=True)
+    (debug_dir / name).write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _raise_for_response(resp, endpoint: str) -> None:
+    if 200 <= resp.status_code < 300:
+        return
+    snippet = resp.text[:300].replace("\n", " ").strip()
+    raise RuntimeError(f"{endpoint} failed with HTTP {resp.status_code} for {resp.url} :: {snippet}")
+
+
+def _request_with_challenge_retry(session, method: str, url: str, endpoint: str, **kwargs):
+    response = session.request(method, url, **kwargs)
+    if response.status_code == 403 and "octofence-pub" in response.text.lower():
+        dump_debug_artifacts(f"{endpoint}_blocked", response.text, str(response.url))
+        solved = solve_challenge_html(session, response.text, str(response.url))
+        if solved:
+            response = session.request(method, url, **kwargs)
+            if response.status_code == 403 and "octofence-pub" in response.text.lower():
+                dump_debug_artifacts(f"{endpoint}_blocked_retry", response.text, str(response.url))
+    _raise_for_response(response, endpoint)
+    return response
+
+
 def visit_event_page(session, slug: str) -> None:
     """Visit the event page to establish a real browser navigation in OctoFence's eyes."""
-    session.get(
+    _request_with_challenge_retry(
+        session,
+        "GET",
         f"https://ticketing.colosseo.it/en/eventi/{slug}/",
+        endpoint="visit_event_page",
         headers={
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Sec-Fetch-Dest": "document",
@@ -23,12 +55,14 @@ def visit_event_page(session, slug: str) -> None:
 def calendars_month(session, page: int, year: int, month: int, slug: str) -> list[dict]:
     """Returns all time slots for the given month."""
     referer = f"https://ticketing.colosseo.it/en/eventi/{slug}/"
-    resp = session.post(
+    resp = _request_with_challenge_retry(
+        session,
+        "POST",
         f"{BASE_URL}/calendars_month",
+        endpoint="calendars_month",
         data={"action": "midaabc_calendars_month", "page": page, "year": year, "month": month},
         headers={"Referer": referer},
     )
-    resp.raise_for_status()
     body = resp.json()
     if not body.get("success"):
         raise RuntimeError(f"calendars_month failed: {body}")
@@ -38,8 +72,11 @@ def calendars_month(session, page: int, year: int, month: int, slug: str) -> lis
 def tariffs(session: requests.Session, period_id: str, start_time: str, slug: str, date: str) -> list[dict]:
     """Returns available tariff types for the given slot."""
     referer = f"https://ticketing.colosseo.it/en/eventi/{slug}/?t={date}"
-    resp = session.post(
+    resp = _request_with_challenge_retry(
+        session,
+        "POST",
         f"{BASE_URL}/tariffs",
+        endpoint="tariffs",
         data={
             "action": "midaabc_tariffs",
             "period_id": period_id,
@@ -47,11 +84,43 @@ def tariffs(session: requests.Session, period_id: str, start_time: str, slug: st
         },
         headers={"Referer": referer},
     )
-    resp.raise_for_status()
     body = resp.json()
     if not body.get("success"):
         raise RuntimeError(f"tariffs failed: {body}")
     return body["data"]
+
+
+def build_addtocart_item(
+    period_id: str,
+    start_time: str,
+    end_time: str,
+    quantity: int,
+    tariff: dict,
+) -> dict[str, str | int]:
+    detail_guid = tariff.get("detail_guid") or tariff.get("detailGuid") or "_draft_0"
+    object_guid = tariff.get("object_guid") or tariff.get("objectGuid")
+    if not object_guid:
+        raise RuntimeError(f"Selected tariff is missing object_guid: {tariff}")
+
+    object_tablename = (
+        tariff.get("object_tablename")
+        or tariff.get("objectTableName")
+        or tariff.get("tablename")
+        or "packetTypes"
+    )
+
+    return {
+        "items[0][detail_guid]": detail_guid,
+        "items[0][period_id]": period_id,
+        "items[0][start_time]": start_time,
+        "items[0][end_time]": end_time,
+        "items[0][object_guid]": object_guid,
+        "items[0][object_tablename]": object_tablename,
+        "items[0][quantity]": quantity,
+        "items[0][convention_guid]": tariff.get("convention_guid", ""),
+        "items[0][convention_text]": tariff.get("convention_text", ""),
+        "items[0][group_guid]": tariff.get("group_guid", ""),
+    }
 
 
 def addtocart(
@@ -59,33 +128,35 @@ def addtocart(
     period_id: str,
     start_time: str,
     end_time: str,
-    object_guid: str,
     quantity: int,
     page: int,
     slug: str,
+    tariff: dict,
 ) -> dict:
     """Adds tickets to cart. Returns response data on success."""
     referer = f"https://ticketing.colosseo.it/en/eventi/{slug}/?t={urllib.parse.quote(start_time)}"
-    data = {
+    data = build_addtocart_item(period_id, start_time, end_time, quantity, tariff)
+    data.update({
         "action": "midaabc_addtocart",
-        "items[0][detail_guid]": "_draft_0",
-        "items[0][period_id]": period_id,
-        "items[0][start_time]": start_time,
-        "items[0][end_time]": end_time,
-        "items[0][object_guid]": object_guid,
-        "items[0][object_tablename]": "packetTypes",
-        "items[0][quantity]": quantity,
-        "items[0][convention_guid]": "",
-        "items[0][convention_text]": "",
-        "items[0][group_guid]": "",
         "page": page,
-    }
-    resp = session.post(
+    })
+    _write_debug_json(
+        "last_addtocart_payload.json",
+        {
+            "referer": referer,
+            "payload": data,
+            "selected_tariff": tariff,
+            "cookies": {cookie.name: cookie.value for cookie in session.cookies.jar},
+        },
+    )
+    resp = _request_with_challenge_retry(
+        session,
+        "POST",
         f"{BASE_URL}/addtocart",
+        endpoint="addtocart",
         data=data,
         headers={"Referer": referer},
     )
-    resp.raise_for_status()
     body = resp.json()
     if not body.get("success"):
         raise RuntimeError(f"addtocart failed: {body}")
@@ -109,4 +180,11 @@ def find_full_price_tariff(tariff_list: list[dict]) -> dict | None:
     for t in tariff_list:
         if t.get("label", "").lower() == "full price":
             return t
+    return None
+
+
+def find_tariff_by_guid(tariff_list: list[dict], object_guid: str) -> dict | None:
+    for tariff in tariff_list:
+        if tariff.get("object_guid") == object_guid or tariff.get("objectGuid") == object_guid:
+            return tariff
     return None

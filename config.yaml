@@ -1,11 +1,54 @@
 active_event: easy_test
+target_date: "2026-03-29"
+
+session:
+  impersonate: "firefox"
+  rebuild_on_error: true
+  accept_language: "en-US,en;q=0.9"
+  headers:
+    User-Agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:148.0) Gecko/20100101 Firefox/148.0"
+    Sec-GPC: "1"
+
+browser_profile:
+  user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:148.0) Gecko/20100101 Firefox/148.0"
+  language: "en-US"
+  color_depth: 24
+  screen_width: 1470
+  screen_height: 956
+  timezone_offset: -240
+  has_session_storage: true
+  has_local_storage: true
+  has_indexed_db: true
+  add_behavior_type: "undefined"
+  open_database_type: "undefined"
+  cpu_class: ""
+  platform: "MacIntel"
+  do_not_track: ""
+  plugins_string: ""
+  canvas_fingerprint: ""
+
+bootstrap:
+  enabled: true
+  clean_start: true
+  generate_fp_cookie: true
+  overwrite_fp_cookie: true
+  solve_inline_script: true
+  scan_scripts_for_markers: true
+  persist_cookies: true
+  timeout_seconds: 20
+  landing_url: "https://ticketing.colosseo.it/"
 
 events:
   easy_test:
     slug: "24h-colosseo-foro-romano-palatino"
     page: 35
-    date: "2026-04-24"
     object_guid: "2931a83e-6b37-43c2-ace0-3ce60027fc0e"  # Full price tariff
+    quantity: 6
+
+  real_underground:
+    slug: "full-experience-sotterranei-e-arena"
+    page: 225
+    object_guid: null
     quantity: 6
 
   # real_event:
@@ -15,6 +58,6 @@ events:
   #   object_guid: null  # will call tariffs to find Full price
   #   quantity: 6
 
-proxy: "http://splk9c5sll:A3vs=e0mggE5W0aoNe@us.decodo.com:10001"
+proxy: null
 
 poll_interval_seconds: 10
