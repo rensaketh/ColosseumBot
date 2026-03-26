@@ -1,0 +1,20 @@
+active_event: easy_test
+
+events:
+  easy_test:
+    slug: "24h-colosseo-foro-romano-palatino"
+    page: 35
+    date: "2026-04-24"
+    object_guid: "2931a83e-6b37-43c2-ace0-3ce60027fc0e"  # Full price tariff
+    quantity: 6
+
+  # real_event:
+  #   slug: "..."
+  #   page: ...
+  #   date: "2026-05-01"
+  #   object_guid: null  # will call tariffs to find Full price
+  #   quantity: 6
+
+proxy: "http://splk9c5sll:A3vs=e0mggE5W0aoNe@us.decodo.com:10001"
+
+poll_interval_seconds: 10
