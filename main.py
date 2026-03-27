@@ -98,6 +98,8 @@ def run():
     page = event["page"]
     target_date = event.get("date", config["target_date"])  # "YYYY-MM-DD"
     object_guid = event.get("object_guid")  # may be None
+    object_tablename = event.get("object_tablename", "packetTypes")
+    detail_guid = event.get("detail_guid", "_draft_0")
     quantity = event["quantity"]
 
     year, month, _ = target_date.split("-")
@@ -151,31 +153,41 @@ def run():
             end_time = slot["endDateTime"]
             print(f"found slot {start_time} (capacity={slot['capacity']})")
 
-            print("  Fetching tariffs for selected slot...")
-            tariff_list = tariffs(session, period_id, start_time, slug, target_date)
-            selected_tariff = None
-
             if object_guid:
-                selected_tariff = find_tariff_by_guid(tariff_list, object_guid)
-                if selected_tariff:
-                    print(f"  matched configured object_guid: {object_guid}")
-                else:
-                    print("  configured object_guid not found in live tariff list; falling back to Full price...")
-
-            if not selected_tariff:
+                selected_tariff = {
+                    "object_guid": object_guid,
+                    "object_tablename": object_tablename,
+                    "detail_guid": detail_guid,
+                    "convention_guid": "",
+                    "convention_text": "",
+                    "group_guid": "",
+                }
+                print(f"  Using configured tariff directly: {object_guid}")
+                write_debug_json(
+                    "last_tariffs.json",
+                    {
+                        "slot": slot,
+                        "selected_tariff": selected_tariff,
+                        "tariffs": None,
+                        "source": "configured_object_guid",
+                    },
+                )
+            else:
+                print("  Fetching tariffs for selected slot...")
+                tariff_list = tariffs(session, period_id, start_time, slug, target_date)
                 selected_tariff = find_full_price_tariff(tariff_list)
                 if not selected_tariff:
                     raise RuntimeError(f"Could not resolve a usable tariff from response: {tariff_list}")
                 print(f"  resolved Full price tariff: {selected_tariff.get('object_guid')}")
-
-            write_debug_json(
-                "last_tariffs.json",
-                {
-                    "slot": slot,
-                    "selected_tariff": selected_tariff,
-                    "tariffs": tariff_list,
-                },
-            )
+                write_debug_json(
+                    "last_tariffs.json",
+                    {
+                        "slot": slot,
+                        "selected_tariff": selected_tariff,
+                        "tariffs": tariff_list,
+                        "source": "tariffs_response",
+                    },
+                )
 
             visit_event_page(session, slug)
             print(f"  Adding {quantity}x to cart...", end=" ", flush=True)

@@ -70,7 +70,7 @@ events:
   real_underground:
     slug: "full-experience-sotterranei-e-arena"
     page: 225
-    object_guid: null
+    object_guid: "dc55dd7b-995c-4f23-96bd-93dabd7a9080"
     quantity: 6
 
   # real_event:
