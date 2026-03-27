@@ -1,3 +1,5 @@
 curl_cffi
 pyyaml
 requests
+twilio
+python-dotenv

@@ -6,7 +6,7 @@ Small polling bot for the course ticketing challenge. It bootstraps an OctoFence
 
 - Python 3.14+
 - Node.js
-- macOS is optional, but the success alarm uses `osascript` and `say` when available
+- macOS is optional, but the local fallback alarm uses `osascript` and `say` when available
 
 Python dependencies are listed in `requirements.txt`. Node.js is a separate system dependency because the bootstrap solver runs `bot/js/solve_inline_challenge.js`.
 
@@ -33,6 +33,23 @@ Install Node.js separately if it is not already present. For example on macOS wi
 brew install node
 ```
 
+## Notifications
+
+Success notifications now use Twilio first and fall back to the local macOS alarm if Twilio is not configured or the API call fails.
+
+Set these environment variables to enable Twilio calling:
+
+```bash
+export TWILIO_ACCOUNT_SID=your_account_sid
+export TWILIO_AUTH_TOKEN=your_auth_token
+export TWILIO_FROM_NUMBER=+15555550123
+export TWILIO_TO_NUMBER=+15555550999
+```
+
+You can also copy `.env.example` to `.env.real` and fill in the values there. The bot will auto-load `.env.real` at runtime.
+
+If Twilio variables are not set, the bot will still use the local terminal bell / macOS notification / spoken alert.
+
 ## Config
 
 Main settings live in `config.yaml`.
@@ -58,7 +75,7 @@ Important fields:
    - `calendars_month`
    - `tariffs`
    - `addtocart`
-6. On success, `bot/alarm.py` prints a success banner and triggers notification/speech on macOS.
+6. On success, `bot/notify.py` tries a Twilio voice call first and falls back to the local alarm in `bot/alarm.py`.
 
 ## Run
 

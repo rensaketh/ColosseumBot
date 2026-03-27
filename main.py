@@ -7,9 +7,9 @@ from pathlib import Path
 
 import yaml
 
-from bot.alarm import sound_alarm
 from bot.api import addtocart, calendars_month, find_full_price_tariff, find_slot, find_tariff_by_guid, tariffs, visit_event_page
 from bot.bootstrap import bootstrap_session
+from bot.notify import notify_success
 from bot.session import build_session, session_cookie_dict, session_cookie_value
 
 COOKIES_PATH = "cookies.json"
@@ -183,7 +183,7 @@ def run():
             print(f"done — cart items: {result.get('items')}")
 
             cart_url = f"https://ticketing.colosseo.it/en/checkout/"
-            sound_alarm(f"Tickets added! Go to cart: {cart_url}")
+            notify_success(f"Tickets added! Go to checkout: {cart_url}")
             print(f"\nCart URL: {cart_url}")
             print("\nSet these cookies in your browser before visiting the cart:")
             for name, value in session_cookie_dict(session).items():
