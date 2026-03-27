@@ -6,11 +6,13 @@ session:
   rebuild_on_error: true
   accept_language: "en-US,en;q=0.9"
   headers:
-    User-Agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:148.0) Gecko/20100101 Firefox/148.0"
+    # Keep this aligned with the browser profile on the machine that will open checkout.
+    User-Agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:149.0) Gecko/20100101 Firefox/149.0"
     Sec-GPC: "1"
 
 browser_profile:
-  user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:148.0) Gecko/20100101 Firefox/148.0"
+  # Keep this aligned with session.headers.User-Agent above.
+  user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:149.0) Gecko/20100101 Firefox/149.0"
   language: "en-US"
   color_depth: 24
   screen_width: 1470
