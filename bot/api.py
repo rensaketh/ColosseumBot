@@ -1,5 +1,6 @@
 import urllib.parse
 import json
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -7,6 +8,9 @@ import requests
 from bot.bootstrap import dump_debug_artifacts, solve_challenge_html
 
 BASE_URL = "https://ticketing.colosseo.it/mtajax"
+TRANSIENT_STATUS_CODES = {502, 503, 504}
+TRANSIENT_RETRY_COUNT = 2
+TRANSIENT_RETRY_DELAY_SECONDS = 0.75
 
 
 def _write_debug_json(name: str, payload: dict) -> None:
@@ -22,19 +26,37 @@ def _raise_for_response(resp, endpoint: str) -> None:
     raise RuntimeError(f"{endpoint} failed with HTTP {resp.status_code} for {resp.url} :: {snippet}")
 
 
+def _perform_request_with_retries(session, method: str, url: str, endpoint: str, **kwargs):
+    last_transport_error = None
+
+    for attempt in range(TRANSIENT_RETRY_COUNT + 1):
+        try:
+            response = session.request(method, url, **kwargs)
+        except Exception as exc:
+            last_transport_error = exc
+            if attempt < TRANSIENT_RETRY_COUNT:
+                time.sleep(TRANSIENT_RETRY_DELAY_SECONDS * (attempt + 1))
+                continue
+            raise RuntimeError(f"{endpoint} transport failure for {url} :: {exc}") from exc
+
+        if response.status_code in TRANSIENT_STATUS_CODES and attempt < TRANSIENT_RETRY_COUNT:
+            time.sleep(TRANSIENT_RETRY_DELAY_SECONDS * (attempt + 1))
+            continue
+
+        return response
+
+    if last_transport_error is not None:
+        raise RuntimeError(f"{endpoint} transport failure for {url} :: {last_transport_error}") from last_transport_error
+    raise RuntimeError(f"{endpoint} failed before receiving a usable response for {url}")
+
+
 def _request_with_challenge_retry(session, method: str, url: str, endpoint: str, **kwargs):
-    try:
-        response = session.request(method, url, **kwargs)
-    except Exception as exc:
-        raise RuntimeError(f"{endpoint} transport failure for {url} :: {exc}") from exc
+    response = _perform_request_with_retries(session, method, url, endpoint, **kwargs)
     if response.status_code == 403 and "octofence-pub" in response.text.lower():
         dump_debug_artifacts(f"{endpoint}_blocked", response.text, str(response.url))
         solved = solve_challenge_html(session, response.text, str(response.url))
         if solved:
-            try:
-                response = session.request(method, url, **kwargs)
-            except Exception as exc:
-                raise RuntimeError(f"{endpoint} transport failure after challenge solve for {url} :: {exc}") from exc
+            response = _perform_request_with_retries(session, method, url, endpoint, **kwargs)
             if response.status_code == 403 and "octofence-pub" in response.text.lower():
                 dump_debug_artifacts(f"{endpoint}_blocked_retry", response.text, str(response.url))
     _raise_for_response(response, endpoint)
