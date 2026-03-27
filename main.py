@@ -37,23 +37,35 @@ def write_debug_json(name: str, payload: dict) -> None:
     (debug_dir / name).write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
-def compute_poll_interval(config: dict, target_date: str, now_utc: datetime) -> int:
+def _shifted_slot_minutes(slot_times: list[list[int]], release_offset_minutes: int) -> list[int]:
+    return [
+        ((int(hour) * 60 + int(minute)) + release_offset_minutes) % (24 * 60)
+        for hour, minute in slot_times
+    ]
+
+
+def _format_hhmm(total_minutes: int) -> str:
+    total_minutes %= 24 * 60
+    hour, minute = divmod(total_minutes, 60)
+    return f"{hour:02d}:{minute:02d}"
+
+
+def compute_poll_decision(config: dict, target_date: str, now_utc: datetime, event: dict | None = None) -> dict:
     adaptive = config.get("adaptive_polling", {})
     if not adaptive.get("enabled", False):
-        return config.get("poll_interval_seconds", 10)
+        interval = int(config.get("poll_interval_seconds", 10))
+        return {"interval": interval, "branch": "disabled", "nearest_minutes": None, "target_slot_utc": None}
 
     try:
         target_day = datetime.strptime(target_date, "%Y-%m-%d").date()
     except ValueError:
-        return config.get("poll_interval_seconds", 10)
+        interval = int(config.get("poll_interval_seconds", 10))
+        return {"interval": interval, "branch": "invalid_target_date", "nearest_minutes": None, "target_slot_utc": None}
 
-    if now_utc.date() != target_day:
-        interval = int(adaptive.get("off_date_interval_seconds", adaptive.get("base_interval_seconds", 120)))
-        return apply_poll_jitter(interval, adaptive)
-
-    slot_times = adaptive.get("slot_times_utc", [])
+    slot_times = (event or {}).get("slot_times_utc") or adaptive.get("slot_times_utc", [])
     if not slot_times:
-        return int(adaptive.get("base_interval_seconds", config.get("poll_interval_seconds", 10)))
+        interval = int(adaptive.get("base_interval_seconds", config.get("poll_interval_seconds", 10)))
+        return {"interval": interval, "branch": "no_slots", "nearest_minutes": None, "target_slot_utc": None}
 
     minute_windows = adaptive.get("minute_windows", {})
     fast_window = int(minute_windows.get("fast", 1))
@@ -65,18 +77,44 @@ def compute_poll_interval(config: dict, target_date: str, now_utc: datetime) -> 
     medium_interval = int(intervals.get("medium", 15))
     slow_interval = int(intervals.get("slow", 60))
     base_interval = int(adaptive.get("base_interval_seconds", config.get("poll_interval_seconds", 120)))
+    release_offset_minutes = int(adaptive.get("release_offset_minutes", 0))
 
     now_minutes = now_utc.hour * 60 + now_utc.minute
-    distances = [abs(now_minutes - (int(hour) * 60 + int(minute))) for hour, minute in slot_times]
-    nearest_minutes = min(distances) if distances else 24 * 60
+    shifted_slots = _shifted_slot_minutes(slot_times, release_offset_minutes)
+    nearest_slot = min(shifted_slots, key=lambda slot_minutes: abs(now_minutes - slot_minutes))
+    nearest_minutes = abs(now_minutes - nearest_slot)
 
     if nearest_minutes <= fast_window:
-        return apply_poll_jitter(fast_interval, adaptive)
+        return {
+            "interval": apply_poll_jitter(fast_interval, adaptive),
+            "branch": "fast",
+            "nearest_minutes": nearest_minutes,
+            "target_slot_utc": _format_hhmm(nearest_slot),
+        }
     if nearest_minutes <= medium_window:
-        return apply_poll_jitter(medium_interval, adaptive)
+        return {
+            "interval": apply_poll_jitter(medium_interval, adaptive),
+            "branch": "medium",
+            "nearest_minutes": nearest_minutes,
+            "target_slot_utc": _format_hhmm(nearest_slot),
+        }
     if nearest_minutes <= slow_window:
-        return apply_poll_jitter(slow_interval, adaptive)
-    return apply_poll_jitter(base_interval, adaptive)
+        return {
+            "interval": apply_poll_jitter(slow_interval, adaptive),
+            "branch": "slow",
+            "nearest_minutes": nearest_minutes,
+            "target_slot_utc": _format_hhmm(nearest_slot),
+        }
+    return {
+        "interval": apply_poll_jitter(base_interval, adaptive),
+        "branch": "base",
+        "nearest_minutes": nearest_minutes,
+        "target_slot_utc": _format_hhmm(nearest_slot),
+    }
+
+
+def compute_poll_interval(config: dict, target_date: str, now_utc: datetime, event: dict | None = None) -> int:
+    return int(compute_poll_decision(config, target_date, now_utc, event)["interval"])
 
 
 def apply_poll_jitter(interval: int, adaptive: dict) -> int:
@@ -124,8 +162,12 @@ def run():
     print(f"  Event : {slug}")
     print(f"  Date  : {target_date}")
     print(f"  Qty   : {quantity}")
-    initial_poll = compute_poll_interval(config, target_date, datetime.now(timezone.utc))
-    print(f"  Poll  : adaptive, starting at {initial_poll}s")
+    initial_poll = compute_poll_decision(config, target_date, datetime.now(timezone.utc), event)
+    print(f"  Poll  : adaptive, starting at {initial_poll['interval']}s")
+    adaptive = config.get("adaptive_polling", {})
+    intervals = adaptive.get("interval_seconds", {})
+    if int(adaptive.get("base_interval_seconds", 120)) == int(intervals.get("medium", 15)):
+        print("  PollW : base and medium intervals are both 15s, so those branches will look identical in logs")
     print(f"  IP    : {exit_ip}")
     print(f"  FP    : {session_cookie_value(session, 'octofence_jslc_fp', '<missing>')}")
     if bootstrap.get("enabled"):
@@ -144,7 +186,8 @@ def run():
         attempt += 1
         now_dt = datetime.now(timezone.utc)
         now = now_dt.strftime("%H:%M:%S")
-        poll_interval = compute_poll_interval(config, target_date, now_dt)
+        poll = compute_poll_decision(config, target_date, now_dt, event)
+        poll_interval = int(poll["interval"])
         print(f"[{now}] Attempt {attempt} — checking availability...", end=" ", flush=True)
 
         try:
@@ -153,7 +196,11 @@ def run():
             slot = find_slot(slots, target_date, quantity)
 
             if slot is None:
-                print(f"no slot with capacity >= {quantity} on {target_date} (next poll in {poll_interval}s)")
+                print(
+                    f"no slot with capacity >= {quantity} on {target_date} "
+                    f"(poll={poll['branch']} near {poll.get('target_slot_utc') or '-'} "
+                    f"delta={poll.get('nearest_minutes')}m, next poll in {poll_interval}s)"
+                )
                 time.sleep(poll_interval)
                 continue
 

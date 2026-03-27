@@ -73,6 +73,57 @@ events:
     activity_guid: "5af635e4-abcc-4efd-bb2b-9c2a738812a5"
     object_guid: "dc55dd7b-995c-4f23-96bd-93dabd7a9080"
     quantity: 6
+    slot_times_utc:
+      - [6, 45]
+      - [7, 0]
+      - [7, 45]
+      - [8, 30]
+      - [10, 0]
+      - [10, 15]
+      - [11, 0]
+      - [11, 30]
+      - [11, 45]
+      - [12, 15]
+      - [13, 40]
+      - [14, 10]
+      - [14, 20]
+      - [14, 40]
+      - [15, 0]
+      - [15, 10]
+      - [15, 20]
+
+  attic:
+    slug: "full-experience-attico"
+    page: 133
+    object_guid: "dc55dd7b-995c-4f23-96bd-93dabd7a9080"
+    quantity: 6
+    slot_times_utc:
+      - [6, 50]
+      - [7, 10]
+      - [7, 30]
+      - [7, 50]
+      - [8, 10]
+      - [8, 30]
+      - [8, 50]
+      - [9, 10]
+      - [9, 30]
+      - [9, 50]
+      - [10, 10]
+      - [10, 30]
+      - [10, 50]
+      - [11, 10]
+      - [11, 30]
+      - [11, 50]
+      - [12, 10]
+      - [12, 30]
+      - [12, 50]
+      - [13, 10]
+      - [13, 30]
+      - [13, 50]
+      - [14, 10]
+      - [14, 30]
+      - [14, 50]
+      - [15, 10]
 
   # real_event:
   #   slug: "..."
@@ -88,8 +139,9 @@ poll_interval_seconds: 10
 adaptive_polling:
   enabled: true
   off_date_interval_seconds: 15
-  base_interval_seconds: 15
+  base_interval_seconds: 120
   jitter_seconds: 2
+  release_offset_minutes: 60
   minute_windows:
     fast: 1
     medium: 5
@@ -98,6 +150,7 @@ adaptive_polling:
     fast: 7
     medium: 15
     slow: 60
+  # Global fallback if an event does not define its own slot_times_utc.
   slot_times_utc:
     - [6, 45]
     - [7, 0]
