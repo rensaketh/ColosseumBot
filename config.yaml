@@ -148,7 +148,7 @@ adaptive_polling:
     slow: 15
   interval_seconds:
     fast: 7
-    medium: 15
+    medium: 25
     slow: 60
   # Global fallback if an event does not define its own slot_times_utc.
   slot_times_utc:
