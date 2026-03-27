@@ -90,6 +90,35 @@ def tariffs(session: requests.Session, period_id: str, start_time: str, slug: st
     return body["data"]
 
 
+def activity_tariffs(
+    session: requests.Session,
+    period_id: str,
+    start_time: str,
+    activity_guid: str,
+    slug: str,
+    date: str,
+) -> list[dict]:
+    """Returns available activity-linked products for the given slot/activity."""
+    referer = f"https://ticketing.colosseo.it/en/eventi/{slug}/?t={date}"
+    resp = _request_with_challenge_retry(
+        session,
+        "POST",
+        f"{BASE_URL}/activity_tariffs",
+        endpoint="activity_tariffs",
+        data={
+            "action": "midaabc_activity_tariffs",
+            "period_id": period_id,
+            "start_time": start_time,
+            "activity_guid": activity_guid,
+        },
+        headers={"Referer": referer},
+    )
+    body = resp.json()
+    if not body.get("success"):
+        raise RuntimeError(f"activity_tariffs failed: {body}")
+    return body["data"]
+
+
 def build_addtocart_item(
     period_id: str,
     start_time: str,
@@ -123,6 +152,54 @@ def build_addtocart_item(
     }
 
 
+def build_activity_addtocart_items(
+    period_id: str,
+    start_time: str,
+    end_time: str,
+    quantity: int,
+    activity: dict,
+    tariff: dict,
+) -> dict[str, str | int | bool]:
+    activity_object_guid = (
+        activity.get("object_guid")
+        or activity.get("objectGuid")
+        or activity.get("activity_object_guid")
+        or activity.get("guid")
+    )
+    if not activity_object_guid:
+        raise RuntimeError(f"Selected activity is missing object_guid: {activity}")
+
+    tariff_object_guid = tariff.get("object_guid") or tariff.get("objectGuid")
+    if not tariff_object_guid:
+        raise RuntimeError(f"Selected tariff is missing object_guid: {tariff}")
+
+    return {
+        "items[0][period_id]": period_id,
+        "items[0][start_time]": start_time,
+        "items[0][end_time]": end_time,
+        "items[0][object_guid]": activity_object_guid,
+        "items[0][object_tablename]": "activities",
+        "items[0][activityDetail_guid]": activity.get("activityDetail_guid", ""),
+        "items[0][quantity]": quantity,
+        "items[0][group_guid]": activity.get("group_guid", ""),
+        "items[1][detail_guid]": tariff.get("detail_guid") or tariff.get("detailGuid") or "_draft_0",
+        "items[1][period_id]": period_id,
+        "items[1][start_time]": start_time,
+        "items[1][end_time]": end_time,
+        "items[1][object_guid]": tariff_object_guid,
+        "items[1][object_tablename]": tariff.get("object_tablename")
+        or tariff.get("objectTableName")
+        or tariff.get("tablename")
+        or "packetTypes",
+        "items[1][quantity]": quantity,
+        "items[1][convention_guid]": tariff.get("convention_guid", ""),
+        "items[1][convention_text]": tariff.get("convention_text", ""),
+        "items[1][group_guid]": tariff.get("group_guid", ""),
+        "items[1][activityDetail_guid]": activity.get("activityDetail_guid", ""),
+        "items[1][activityPerPerson]": True,
+    }
+
+
 def addtocart(
     session: requests.Session,
     period_id: str,
@@ -132,10 +209,14 @@ def addtocart(
     page: int,
     slug: str,
     tariff: dict,
+    activity: dict | None = None,
 ) -> dict:
     """Adds tickets to cart. Returns response data on success."""
     referer = f"https://ticketing.colosseo.it/en/eventi/{slug}/?t={urllib.parse.quote(start_time)}"
-    data = build_addtocart_item(period_id, start_time, end_time, quantity, tariff)
+    if activity is not None:
+        data = build_activity_addtocart_items(period_id, start_time, end_time, quantity, activity, tariff)
+    else:
+        data = build_addtocart_item(period_id, start_time, end_time, quantity, tariff)
     data.update({
         "action": "midaabc_addtocart",
         "page": page,
@@ -145,6 +226,7 @@ def addtocart(
         {
             "referer": referer,
             "payload": data,
+            "selected_activity": activity,
             "selected_tariff": tariff,
             "cookies": {cookie.name: cookie.value for cookie in session.cookies.jar},
         },
@@ -188,3 +270,15 @@ def find_tariff_by_guid(tariff_list: list[dict], object_guid: str) -> dict | Non
         if tariff.get("object_guid") == object_guid or tariff.get("objectGuid") == object_guid:
             return tariff
     return None
+
+
+def find_activity_item(activity_list: list[dict], object_guid: str | None = None) -> dict | None:
+    if object_guid:
+        for activity in activity_list:
+            if (
+                activity.get("object_guid") == object_guid
+                or activity.get("objectGuid") == object_guid
+                or activity.get("guid") == object_guid
+            ):
+                return activity
+    return activity_list[0] if activity_list else None

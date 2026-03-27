@@ -7,7 +7,17 @@ from pathlib import Path
 
 import yaml
 
-from bot.api import addtocart, calendars_month, find_full_price_tariff, find_slot, find_tariff_by_guid, tariffs, visit_event_page
+from bot.api import (
+    activity_tariffs,
+    addtocart,
+    calendars_month,
+    find_activity_item,
+    find_full_price_tariff,
+    find_slot,
+    find_tariff_by_guid,
+    tariffs,
+    visit_event_page,
+)
 from bot.bootstrap import bootstrap_session
 from bot.notify import notify_success
 from bot.session import build_session, session_cookie_dict, session_cookie_value
@@ -98,8 +108,7 @@ def run():
     page = event["page"]
     target_date = event.get("date", config["target_date"])  # "YYYY-MM-DD"
     object_guid = event.get("object_guid")  # may be None
-    object_tablename = event.get("object_tablename", "packetTypes")
-    detail_guid = event.get("detail_guid", "_draft_0")
+    activity_guid = event.get("activity_guid")
     quantity = event["quantity"]
 
     year, month, _ = target_date.split("-")
@@ -153,45 +162,59 @@ def run():
             end_time = slot["endDateTime"]
             print(f"found slot {start_time} (capacity={slot['capacity']})")
 
-            if object_guid:
+            selected_activity = None
+            tariff_list = None
+            activity_list = None
+
+            if activity_guid:
+                print("  Fetching activity-linked products for selected slot...")
+                activity_list = activity_tariffs(session, period_id, start_time, activity_guid, slug, target_date)
+                selected_activity = find_activity_item(activity_list)
+                if not selected_activity:
+                    raise RuntimeError(f"Could not resolve a usable activity from response: {activity_list}")
+                print(f"  resolved activity item: {selected_activity.get('object_guid') or selected_activity.get('objectGuid') or selected_activity.get('guid')}")
                 selected_tariff = {
                     "object_guid": object_guid,
-                    "object_tablename": object_tablename,
-                    "detail_guid": detail_guid,
+                    "object_tablename": "packetTypes",
+                    "detail_guid": "_draft_0",
                     "convention_guid": "",
                     "convention_text": "",
                     "group_guid": "",
                 }
-                print(f"  Using configured tariff directly: {object_guid}")
-                write_debug_json(
-                    "last_tariffs.json",
-                    {
-                        "slot": slot,
-                        "selected_tariff": selected_tariff,
-                        "tariffs": None,
-                        "source": "configured_object_guid",
-                    },
-                )
+                if not object_guid:
+                    raise RuntimeError("Activity-driven events require object_guid to be configured for the entrance tariff.")
             else:
                 print("  Fetching tariffs for selected slot...")
                 tariff_list = tariffs(session, period_id, start_time, slug, target_date)
-                selected_tariff = find_full_price_tariff(tariff_list)
+                selected_tariff = None
+
+                if object_guid:
+                    selected_tariff = find_tariff_by_guid(tariff_list, object_guid)
+                    if selected_tariff:
+                        print(f"  matched configured object_guid: {object_guid}")
+                    else:
+                        print("  configured object_guid not found in live tariff list; falling back to Full price...")
+
                 if not selected_tariff:
-                    raise RuntimeError(f"Could not resolve a usable tariff from response: {tariff_list}")
-                print(f"  resolved Full price tariff: {selected_tariff.get('object_guid')}")
-                write_debug_json(
-                    "last_tariffs.json",
-                    {
-                        "slot": slot,
-                        "selected_tariff": selected_tariff,
-                        "tariffs": tariff_list,
-                        "source": "tariffs_response",
-                    },
-                )
+                    selected_tariff = find_full_price_tariff(tariff_list)
+                    if not selected_tariff:
+                        raise RuntimeError(f"Could not resolve a usable tariff from response: {tariff_list}")
+                    print(f"  resolved Full price tariff: {selected_tariff.get('object_guid')}")
+
+            write_debug_json(
+                "last_tariffs.json",
+                {
+                    "slot": slot,
+                    "selected_activity": selected_activity,
+                    "activity_tariffs": activity_list,
+                    "selected_tariff": selected_tariff,
+                    "tariffs": tariff_list,
+                },
+            )
 
             visit_event_page(session, slug)
             print(f"  Adding {quantity}x to cart...", end=" ", flush=True)
-            result = addtocart(session, period_id, start_time, end_time, quantity, page, slug, selected_tariff)
+            result = addtocart(session, period_id, start_time, end_time, quantity, page, slug, selected_tariff, selected_activity)
             print(f"done — cart items: {result.get('items')}")
 
             cart_url = f"https://ticketing.colosseo.it/en/checkout/"

@@ -70,6 +70,7 @@ events:
   real_underground:
     slug: "full-experience-sotterranei-e-arena"
     page: 225
+    activity_guid: "5af635e4-abcc-4efd-bb2b-9c2a738812a5"
     object_guid: "dc55dd7b-995c-4f23-96bd-93dabd7a9080"
     quantity: 6
 
@@ -86,8 +87,8 @@ poll_interval_seconds: 10
 
 adaptive_polling:
   enabled: true
-  off_date_interval_seconds: 120
-  base_interval_seconds: 120
+  off_date_interval_seconds: 15
+  base_interval_seconds: 15
   jitter_seconds: 2
   minute_windows:
     fast: 1
