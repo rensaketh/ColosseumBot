@@ -55,7 +55,7 @@ bootstrap:
   generate_fp_cookie: true
   overwrite_fp_cookie: true
   solve_inline_script: true
-  scan_scripts_for_markers: true
+  scan_scripts_for_markers: false
   persist_cookies: true
   timeout_seconds: 20
   landing_url: "https://ticketing.colosseo.it/"
