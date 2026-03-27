@@ -1,5 +1,5 @@
-active_event: easy_test
-target_date: "2026-03-29"
+active_event: real_underground
+target_date: "2026-04-26"
 
 session:
   impersonate: "firefox"
