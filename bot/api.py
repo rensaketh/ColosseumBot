@@ -9,6 +9,10 @@ from bot.bootstrap import dump_debug_artifacts, solve_challenge_html
 
 BASE_URL = "https://ticketing.colosseo.it/mtajax"
 TRANSIENT_STATUS_CODES = {502, 503, 504}
+
+
+class AddToCartRateLimitedError(RuntimeError):
+    """Raised when addtocart receives a 429. Does not trigger session rebuild."""
 TRANSIENT_RETRY_COUNT = 2
 TRANSIENT_RETRY_DELAY_SECONDS = 0.75
 
@@ -50,7 +54,7 @@ def _perform_request_with_retries(session, method: str, url: str, endpoint: str,
     raise RuntimeError(f"{endpoint} failed before receiving a usable response for {url}")
 
 
-def _request_with_challenge_retry(session, method: str, url: str, endpoint: str, **kwargs):
+def _request_with_challenge_retry(session, method: str, url: str, endpoint: str, *, bootstrap_on_429: bool = True, **kwargs):
     response = _perform_request_with_retries(session, method, url, endpoint, **kwargs)
     if response.status_code == 403 and "octofence-pub" in response.text.lower():
         dump_debug_artifacts(f"{endpoint}_blocked", response.text, str(response.url))
@@ -59,6 +63,11 @@ def _request_with_challenge_retry(session, method: str, url: str, endpoint: str,
             response = _perform_request_with_retries(session, method, url, endpoint, **kwargs)
             if response.status_code == 403 and "octofence-pub" in response.text.lower():
                 dump_debug_artifacts(f"{endpoint}_blocked_retry", response.text, str(response.url))
+    elif response.status_code == 429 and bootstrap_on_429:
+        dump_debug_artifacts(f"{endpoint}_429", response.text, str(response.url))
+        solved = solve_challenge_html(session, response.text, str(response.url))
+        if solved:
+            response = _perform_request_with_retries(session, method, url, endpoint, **kwargs)
     _raise_for_response(response, endpoint)
     return response
 
@@ -259,14 +268,20 @@ def addtocart(
             "cookies": {cookie.name: cookie.value for cookie in session.cookies.jar},
         },
     )
-    resp = _request_with_challenge_retry(
-        session,
-        "POST",
-        f"{BASE_URL}/addtocart",
-        endpoint="addtocart",
-        data=data,
-        headers={"Referer": referer},
-    )
+    try:
+        resp = _request_with_challenge_retry(
+            session,
+            "POST",
+            f"{BASE_URL}/addtocart",
+            endpoint="addtocart",
+            bootstrap_on_429=False,
+            data=data,
+            headers={"Referer": referer},
+        )
+    except RuntimeError as exc:
+        if "HTTP 429" in str(exc):
+            raise AddToCartRateLimitedError(str(exc)) from exc
+        raise
     body = resp.json()
     if not body.get("success"):
         raise RuntimeError(f"addtocart failed: {body}")

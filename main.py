@@ -8,6 +8,7 @@ from pathlib import Path
 import yaml
 
 from bot.api import (
+    AddToCartRateLimitedError,
     activity_tariffs,
     addtocart,
     calendars_month,
@@ -275,6 +276,10 @@ def run():
         except KeyboardInterrupt:
             print("\nStopped by user.")
             sys.exit(0)
+        except AddToCartRateLimitedError as e:
+            print(f"error: {e}")
+            print("debug: addtocart 429 — skipping session rebuild, retrying after delay")
+            time.sleep(poll_interval)
         except Exception as e:
             print(f"error: {e}")
             print("debug: if this was an OctoFence block, inspect files under ./debug/")
