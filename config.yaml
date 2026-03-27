@@ -29,6 +29,26 @@ browser_profile:
   plugins_string: ""
   canvas_fingerprint: ""
 
+# Browser profile presets for sharing with friends.
+# To switch machines, copy the matching User-Agent into:
+# - session.headers.User-Agent
+# - browser_profile.user_agent
+# and update platform / screen / timezone fields below to match.
+browser_presets:
+  mac_firefox_149:
+    user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:149.0) Gecko/20100101 Firefox/149.0"
+    platform: "MacIntel"
+    timezone_offset: -240
+    screen_width: 1470
+    screen_height: 956
+
+  windows_firefox_149:
+    user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:149.0) Gecko/20100101 Firefox/149.0"
+    platform: "Win32"
+    timezone_offset: -240
+    screen_width: 1920
+    screen_height: 1080
+
 bootstrap:
   enabled: true
   clean_start: true
