@@ -63,3 +63,35 @@ events:
 proxy: null
 
 poll_interval_seconds: 10
+
+adaptive_polling:
+  enabled: true
+  off_date_interval_seconds: 120
+  base_interval_seconds: 120
+  jitter_seconds: 2
+  minute_windows:
+    fast: 1
+    medium: 5
+    slow: 15
+  interval_seconds:
+    fast: 7
+    medium: 15
+    slow: 60
+  slot_times_utc:
+    - [6, 45]
+    - [7, 0]
+    - [7, 45]
+    - [8, 30]
+    - [10, 0]
+    - [10, 15]
+    - [11, 0]
+    - [11, 30]
+    - [11, 45]
+    - [12, 15]
+    - [13, 40]
+    - [14, 10]
+    - [14, 20]
+    - [14, 40]
+    - [15, 0]
+    - [15, 10]
+    - [15, 20]
