@@ -123,7 +123,7 @@ def run():
             result = addtocart(session, period_id, start_time, end_time, quantity, page, slug, selected_tariff)
             print(f"done — cart items: {result.get('items')}")
 
-            cart_url = f"https://ticketing.colosseo.it/en/cart/"
+            cart_url = f"https://ticketing.colosseo.it/en/checkout/"
             sound_alarm(f"Tickets added! Go to cart: {cart_url}")
             print(f"\nCart URL: {cart_url}")
             print("\nSet these cookies in your browser before visiting the cart:")

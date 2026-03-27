@@ -8,7 +8,7 @@ Small polling bot for the course ticketing challenge. It bootstraps an OctoFence
 - Node.js
 - macOS is optional, but the success alarm uses `osascript` and `say` when available
 
-Python dependencies are listed in `requirements.txt`.
+Python dependencies are listed in `requirements.txt`. Node.js is a separate system dependency because the bootstrap solver runs `bot/js/solve_inline_challenge.js`.
 
 ## Install
 
@@ -25,6 +25,12 @@ Or create one first:
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+```
+
+Install Node.js separately if it is not already present. For example on macOS with Homebrew:
+
+```bash
+brew install node
 ```
 
 ## Config
