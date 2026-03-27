@@ -23,12 +23,18 @@ def _raise_for_response(resp, endpoint: str) -> None:
 
 
 def _request_with_challenge_retry(session, method: str, url: str, endpoint: str, **kwargs):
-    response = session.request(method, url, **kwargs)
+    try:
+        response = session.request(method, url, **kwargs)
+    except Exception as exc:
+        raise RuntimeError(f"{endpoint} transport failure for {url} :: {exc}") from exc
     if response.status_code == 403 and "octofence-pub" in response.text.lower():
         dump_debug_artifacts(f"{endpoint}_blocked", response.text, str(response.url))
         solved = solve_challenge_html(session, response.text, str(response.url))
         if solved:
-            response = session.request(method, url, **kwargs)
+            try:
+                response = session.request(method, url, **kwargs)
+            except Exception as exc:
+                raise RuntimeError(f"{endpoint} transport failure after challenge solve for {url} :: {exc}") from exc
             if response.status_code == 403 and "octofence-pub" in response.text.lower():
                 dump_debug_artifacts(f"{endpoint}_blocked_retry", response.text, str(response.url))
     _raise_for_response(response, endpoint)
