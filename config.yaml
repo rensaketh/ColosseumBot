@@ -186,7 +186,7 @@ adaptive_polling:
   off_date_interval_seconds: 15
   base_interval_seconds: 120
   jitter_seconds: 2
-  release_offset_minutes: 60
+  release_offset_minutes: 0
   minute_windows:
     fast: 1
     medium: 5
